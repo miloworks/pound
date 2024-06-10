@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -29,10 +30,17 @@ enum editor_key {
 
 /*** Data ***/
 
+typedef struct erow {
+	int size;
+	char *chars;
+} erow;
+
 struct editor_config {
 	int cx, cy;
 	int screenrows;
 	int screencols;
+	int numrows;
+	erow row;
 	struct termios orig_termios;
 };
 
@@ -151,6 +159,19 @@ int get_window_size(int *rows, int *cols) {
 	}
 }
 
+/*** File i/o ***/
+
+void editor_open() {
+	char *line = "Hello, world!";
+	ssize_t linelen = 13;
+
+	E.row.size = linelen;
+	E.row.chars = malloc(linelen + 1);
+	memcpy(E.row.chars, line, linelen);
+	E.row.chars[linelen] = '\0';
+	E.numrows = 1;
+}
+
 /*** Append Buffer ***/
 
 struct abuf {
@@ -177,20 +198,26 @@ void ab_free(struct abuf *ab) {
 void editor_draws_rows(struct abuf *ab) {
 	int y;
 	for (y = 0; y < E.screenrows; y++) {
-		if (y == E.screenrows / 3) {
-			char welcome[80];
-			int welcomelen = snprintf(welcome, sizeof(welcome),
-				"Pound editor -- version %s", POUND_VERSION);
-			if (welcomelen > E.screencols) welcomelen = E.screencols;
-			int padding = (E.screencols - welcomelen) / 2;
-			if (padding) {
+		if (y >= E.numrows) {
+			if (y == E.screenrows / 3) {
+				char welcome[80];
+				int welcomelen = snprintf(welcome, sizeof(welcome),
+										  "Pound editor -- version %s", POUND_VERSION);
+				if (welcomelen > E.screencols) welcomelen = E.screencols;
+				int padding = (E.screencols - welcomelen) / 2;
+				if (padding) {
+					ab_append(ab, "~", 1);
+					padding--;
+				}
+				while (padding--) ab_append(ab, " ", 1);
+				ab_append(ab, welcome, welcomelen);
+			} else {
 				ab_append(ab, "~", 1);
-				padding--;
 			}
-			while (padding--) ab_append(ab, " ", 1);
-			ab_append(ab, welcome, welcomelen);
 		} else {
-			ab_append(ab, "~", 1);
+			int len = E.row.size;
+			if (len > E.screencols) len = E.screencols;
+			ab_append(ab, E.row.chars, len);
 		}
 
 		ab_append(ab, "\x1b[K", 3);
@@ -284,12 +311,14 @@ void editor_process_keypress() {
 void init_editor() {
 	E.cx = 0;
 	E.cy = 0;
+	E.numrows = 0;
 	if (get_window_size(&E.screenrows, &E.screencols) == -1) die("get_window_size");
 }
 
 int main() {
 	enable_raw_mode();
 	init_editor();
+	editor_open();
 
 	while (1) {
 		editor_refresh_screen();
